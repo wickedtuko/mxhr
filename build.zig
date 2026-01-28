@@ -83,6 +83,13 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
+    const win32api = b.createModule(.{
+        .root_source_file = b.path("./libs/zigwin32/win32.zig"),
+    });
+    exe.root_module.addImport("win32", win32api);
+    exe.linkLibC();
+    exe.subsystem = .Windows;
+
     // This declares intent for the executable to be installed into the
     // install prefix when running `zig build` (i.e. when executing the default
     // step). By default the install prefix is `zig-out/` but can be overridden

@@ -1,27 +1,87 @@
-const std = @import("std");
-const mxhr = @import("mxhr");
+pub const UNICODE = true;
+const win32 = @import("win32").everything;
+const L = win32.L;
+const HWND = win32.HWND;
 
-pub fn main() !void {
-    // Prints to stderr, ignoring potential errors.
-    std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
-    try mxhr.bufferedPrint();
-}
+pub export fn wWinMain(
+    hInstance: win32.HINSTANCE,
+    _: ?win32.HINSTANCE,
+    pCmdLine: [*:0]u16,
+    nCmdShow: u32,
+) callconv(.winapi) c_int {
+    _ = pCmdLine;
+    _ = nCmdShow;
 
-test "simple test" {
-    const gpa = std.testing.allocator;
-    var list: std.ArrayList(i32) = .empty;
-    defer list.deinit(gpa); // Try commenting this out and see if zig detects the memory leak!
-    try list.append(gpa, 42);
-    try std.testing.expectEqual(@as(i32, 42), list.pop());
-}
-
-test "fuzz example" {
-    const Context = struct {
-        fn testOne(context: @This(), input: []const u8) anyerror!void {
-            _ = context;
-            // Try passing `--fuzz` to `zig build test` and see if it manages to fail this test case!
-            try std.testing.expect(!std.mem.eql(u8, "canyoufindme", input));
-        }
+    const CLASS_NAME = L("Sample Window Class");
+    const wc = win32.WNDCLASSW{
+        .style = .{},
+        .lpfnWndProc = WindowProc,
+        .cbClsExtra = 0,
+        .cbWndExtra = 0,
+        .hInstance = hInstance,
+        .hIcon = null,
+        .hCursor = win32.LoadCursorW(null, win32.IDC_ARROW),
+        .hbrBackground = @ptrFromInt(@intFromEnum(win32.COLOR_WINDOW) + 1),
+        .lpszMenuName = L("Some Menu Name"),
+        .lpszClassName = CLASS_NAME,
     };
-    try std.testing.fuzz(Context{}, Context.testOne, .{});
+
+    if (0 == win32.RegisterClassW(&wc))
+        win32.panicWin32("RegisterClass", win32.GetLastError());
+
+    const hwnd = win32.CreateWindowExW(
+        .{},
+        CLASS_NAME,
+        L("mxhr"),
+        win32.WS_OVERLAPPEDWINDOW,
+        win32.CW_USEDEFAULT,
+        win32.CW_USEDEFAULT, // Position
+        400,
+        200, // Size
+        null, // Parent window
+        null, // Menu
+        hInstance, // Instance handle
+        null, // Additional application data
+    ) orelse win32.panicWin32("CreateWindow", win32.GetLastError());
+
+    _ = win32.ShowWindow(hwnd, .{ .SHOWNORMAL = 1 });
+
+    var msg: win32.MSG = undefined;
+    while (win32.GetMessageW(&msg, null, 0, 0) != 0) {
+        _ = win32.TranslateMessage(&msg);
+        _ = win32.DispatchMessageW(&msg);
+    }
+    return @intCast(msg.wParam);
+}
+
+fn WindowProc(
+    hwnd: HWND,
+    uMsg: u32,
+    wParam: win32.WPARAM,
+    lParam: win32.LPARAM,
+) callconv(.winapi) win32.LRESULT {
+    switch (uMsg) {
+        win32.WM_DESTROY => {
+            win32.PostQuitMessage(0);
+            return 0;
+        },
+        else => {},
+    }
+    return win32.DefWindowProcW(hwnd, uMsg, wParam, lParam);
+}
+
+pub export fn WinMain(
+    hInstance: win32.HINSTANCE,
+    hPrevInstance: ?win32.HINSTANCE,
+    pCmdLine: [*:0]u8,
+    nShowCmd: u32,
+) callconv(.winapi) c_int {
+    _ = pCmdLine;
+
+    return wWinMain(
+        hInstance,
+        hPrevInstance,
+        win32.GetCommandLineW().?,
+        nShowCmd,
+    );
 }
