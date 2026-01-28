@@ -4,6 +4,7 @@ const L = win32.L;
 const HWND = win32.HWND;
 
 const WM_TRAYICON = win32.WM_USER + 1;
+const ID_TRAY_EXIT = 1001;
 
 pub export fn wWinMain(
     hInstance: win32.HINSTANCE,
@@ -89,8 +90,38 @@ fn WindowProc(
                     _ = win32.SetForegroundWindow(hwnd);
                 }
             } else if (lParam == win32.WM_RBUTTONDOWN) {
-                // Right click on tray icon - could show context menu
-                _ = win32.SetForegroundWindow(hwnd);
+                // Right click on tray icon - show context menu
+                const hMenu = win32.CreatePopupMenu();
+                if (hMenu) |menu| {
+                    _ = win32.AppendMenuW(menu, .{}, ID_TRAY_EXIT, L("Exit"));
+
+                    // Get cursor position for menu
+                    var pt: win32.POINT = undefined;
+                    _ = win32.GetCursorPos(&pt);
+
+                    // Required to make menu disappear when clicking outside
+                    _ = win32.SetForegroundWindow(hwnd);
+
+                    // Show menu and get selection
+                    _ = win32.TrackPopupMenu(
+                        menu,
+                        .{},
+                        pt.x,
+                        pt.y,
+                        0,
+                        hwnd,
+                        null,
+                    );
+
+                    _ = win32.DestroyMenu(menu);
+                }
+            }
+            return 0;
+        },
+        win32.WM_COMMAND => {
+            const cmd = @as(u16, @truncate(wParam & 0xFFFF));
+            if (cmd == ID_TRAY_EXIT) {
+                _ = win32.DestroyWindow(hwnd);
             }
             return 0;
         },
