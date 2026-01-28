@@ -30,7 +30,7 @@ pub export fn wWinMain(
         win32.panicWin32("RegisterClass", win32.GetLastError());
 
     const hwnd = win32.CreateWindowExW(
-        .{},
+        .{ .TOOLWINDOW = 1 },
         CLASS_NAME,
         L("mxhr"),
         win32.WS_OVERLAPPEDWINDOW,
