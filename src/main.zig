@@ -6,7 +6,19 @@ const HWND = win32.HWND;
 const WM_TRAYICON = win32.WM_USER + 1;
 const ID_TRAY_EXIT = 1001;
 
+const CrosshairSettings = struct {
+    color: u32 = 0x00FFFF, // Bright yellow (BGR format)
+    border_color: u32 = 0xFFFFFF, // White
+    thickness: i32 = 3,
+    radius: i32 = 20, // Center gap
+    opacity: u8 = 255, // 100% opacity (0-255)
+    border_size: i32 = 1,
+};
+
 var g_hCrosshairWindow: ?HWND = null;
+var g_crosshairSettings = CrosshairSettings{};
+var g_cursorPos: win32.POINT = .{ .x = 0, .y = 0 };
+var g_mouseHook: ?win32.HHOOK = null;
 
 pub export fn wWinMain(
     hInstance: win32.HINSTANCE,
@@ -68,6 +80,20 @@ pub export fn wWinMain(
     // Create the crosshair overlay window
     g_hCrosshairWindow = CreateCrosshairWindow(hInstance) catch null;
 
+    // Install mouse hook for cursor tracking
+    g_mouseHook = win32.SetWindowsHookExW(
+        win32.WH_MOUSE_LL,
+        MouseHookProc,
+        hInstance,
+        0,
+    );
+
+    // Initial crosshair display
+    if (g_hCrosshairWindow) |ch_hwnd| {
+        _ = win32.ShowWindow(ch_hwnd, win32.SW_SHOWNOACTIVATE);
+        UpdateCrosshairDisplay();
+    }
+
     _ = win32.ShowWindow(hwnd, win32.SW_HIDE);
 
     var msg: win32.MSG = undefined;
@@ -85,6 +111,35 @@ fn CrosshairWindowProc(
     lParam: win32.LPARAM,
 ) callconv(.winapi) win32.LRESULT {
     switch (uMsg) {
+        win32.WM_PAINT => {
+            var ps: win32.PAINTSTRUCT = undefined;
+            const hdc = win32.BeginPaint(hwnd, &ps);
+            if (hdc) |dc| {
+                // Get window dimensions
+                var rect: win32.RECT = undefined;
+                _ = win32.GetClientRect(hwnd, &rect);
+                const width = rect.right - rect.left;
+                const height = rect.bottom - rect.top;
+
+                // Clear with magenta (this will be made transparent)
+                const hBrush = win32.CreateSolidBrush(0xFF00FF); // Magenta
+                _ = win32.FillRect(dc, &rect, hBrush);
+                _ = win32.DeleteObject(hBrush);
+
+                // Get virtual screen offset
+                const x = win32.GetSystemMetrics(win32.SM_XVIRTUALSCREEN);
+                const y = win32.GetSystemMetrics(win32.SM_YVIRTUALSCREEN);
+
+                // Convert cursor to window coordinates
+                const cursorX = g_cursorPos.x - x;
+                const cursorY = g_cursorPos.y - y;
+
+                // Draw crosshairs
+                DrawCrosshairs(dc, width, height, cursorX, cursorY, g_crosshairSettings);
+            }
+            _ = win32.EndPaint(hwnd, &ps);
+            return 0;
+        },
         win32.WM_NCHITTEST => {
             // Make window click-through
             return win32.HTTRANSPARENT;
@@ -95,6 +150,17 @@ fn CrosshairWindowProc(
         else => {},
     }
     return win32.DefWindowProcW(hwnd, uMsg, wParam, lParam);
+}
+
+fn MouseHookProc(
+    nCode: i32,
+    wParam: win32.WPARAM,
+    lParam: win32.LPARAM,
+) callconv(.winapi) win32.LRESULT {
+    if (nCode >= 0 and wParam == win32.WM_MOUSEMOVE) {
+        UpdateCrosshairDisplay();
+    }
+    return win32.CallNextHookEx(null, nCode, wParam, lParam);
 }
 
 fn CreateCrosshairWindow(hInstance: win32.HINSTANCE) !HWND {
@@ -126,7 +192,7 @@ fn CreateCrosshairWindow(hInstance: win32.HINSTANCE) !HWND {
 
     // Create fullscreen transparent overlay window
     const hwnd = win32.CreateWindowExW(
-        .{ .LAYERED = 1, .TRANSPARENT = 1, .TOOLWINDOW = 1, .TOPMOST = 1 },
+        .{ .LAYERED = 1, .TOOLWINDOW = 1, .TOPMOST = 1 },
         CROSSHAIR_CLASS_NAME,
         L("Crosshair Overlay"),
         win32.WS_POPUP,
@@ -140,10 +206,69 @@ fn CreateCrosshairWindow(hInstance: win32.HINSTANCE) !HWND {
         null,
     ) orelse return error.CreateWindowFailed;
 
-    // Set window to be completely transparent initially
-    _ = win32.SetLayeredWindowAttributes(hwnd, 0, 0, win32.LWA_ALPHA);
+    // Make magenta color transparent (so only crosshairs are visible)
+    _ = win32.SetLayeredWindowAttributes(hwnd, 0xFF00FF, 0, win32.LWA_COLORKEY);
 
     return hwnd;
+}
+
+fn DrawCrosshairs(hdc: win32.HDC, width: i32, height: i32, cursorX: i32, cursorY: i32, settings: CrosshairSettings) void {
+    // Create pen for border
+    const hBorderPen = win32.CreatePen(win32.PS_SOLID, settings.border_size, settings.border_color);
+    const hOldBorderPen = win32.SelectObject(hdc, hBorderPen);
+
+    // Draw border lines (if border size > 0)
+    if (settings.border_size > 0) {
+        const border_offset = @divTrunc(settings.thickness, 2) + @divTrunc(settings.border_size, 2);
+
+        // Left horizontal line border
+        _ = win32.MoveToEx(hdc, 0, cursorY, null);
+        _ = win32.LineTo(hdc, cursorX - settings.radius - border_offset, cursorY);
+
+        // Right horizontal line border
+        _ = win32.MoveToEx(hdc, cursorX + settings.radius + border_offset, cursorY, null);
+        _ = win32.LineTo(hdc, width, cursorY);
+
+        // Top vertical line border
+        _ = win32.MoveToEx(hdc, cursorX, 0, null);
+        _ = win32.LineTo(hdc, cursorX, cursorY - settings.radius - border_offset);
+
+        // Bottom vertical line border
+        _ = win32.MoveToEx(hdc, cursorX, cursorY + settings.radius + border_offset, null);
+        _ = win32.LineTo(hdc, cursorX, height);
+    }
+
+    _ = win32.SelectObject(hdc, hOldBorderPen);
+    _ = win32.DeleteObject(hBorderPen);
+
+    // Create pen for main crosshair
+    const hPen = win32.CreatePen(win32.PS_SOLID, settings.thickness, settings.color);
+    const hOldPen = win32.SelectObject(hdc, hPen);
+
+    // Draw horizontal line (with gap in center)
+    _ = win32.MoveToEx(hdc, 0, cursorY, null);
+    _ = win32.LineTo(hdc, cursorX - settings.radius, cursorY);
+    _ = win32.MoveToEx(hdc, cursorX + settings.radius, cursorY, null);
+    _ = win32.LineTo(hdc, width, cursorY);
+
+    // Draw vertical line (with gap in center)
+    _ = win32.MoveToEx(hdc, cursorX, 0, null);
+    _ = win32.LineTo(hdc, cursorX, cursorY - settings.radius);
+    _ = win32.MoveToEx(hdc, cursorX, cursorY + settings.radius, null);
+    _ = win32.LineTo(hdc, cursorX, height);
+
+    _ = win32.SelectObject(hdc, hOldPen);
+    _ = win32.DeleteObject(hPen);
+}
+
+fn UpdateCrosshairDisplay() void {
+    const hwnd = g_hCrosshairWindow orelse return;
+
+    // Get cursor position
+    _ = win32.GetCursorPos(&g_cursorPos);
+
+    // Invalidate window to trigger repaint
+    _ = win32.InvalidateRect(hwnd, null, 1);
 }
 
 fn WindowProc(
@@ -199,6 +324,12 @@ fn WindowProc(
             return 0;
         },
         win32.WM_DESTROY => {
+            // Remove mouse hook
+            if (g_mouseHook) |hook| {
+                _ = win32.UnhookWindowsHookEx(hook);
+                g_mouseHook = null;
+            }
+
             // Destroy crosshair window if it exists
             if (g_hCrosshairWindow) |ch_hwnd| {
                 _ = win32.DestroyWindow(ch_hwnd);
