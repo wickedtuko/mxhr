@@ -5,6 +5,7 @@ const HWND = win32.HWND;
 
 const WM_TRAYICON = win32.WM_USER + 1;
 const ID_TRAY_EXIT = 1001;
+const ID_TRAY_TOGGLE_CROSSHAIRS = 1002;
 
 const CrosshairSettings = struct {
     color: u32 = 0x00FFFF, // Bright yellow (BGR format)
@@ -19,6 +20,7 @@ var g_hCrosshairWindow: ?HWND = null;
 var g_crosshairSettings = CrosshairSettings{};
 var g_cursorPos: win32.POINT = .{ .x = 0, .y = 0 };
 var g_mouseHook: ?win32.HHOOK = null;
+var g_crosshairsEnabled: bool = true;
 
 pub export fn wWinMain(
     hInstance: win32.HINSTANCE,
@@ -291,6 +293,10 @@ fn WindowProc(
                 // Right click on tray icon - show context menu
                 const hMenu = win32.CreatePopupMenu();
                 if (hMenu) |menu| {
+                    // Add toggle crosshairs item with checkmark
+                    const toggleText = if (g_crosshairsEnabled) L("Hide Crosshairs") else L("Show Crosshairs");
+                    _ = win32.AppendMenuW(menu, .{}, ID_TRAY_TOGGLE_CROSSHAIRS, toggleText);
+                    _ = win32.AppendMenuW(menu, .{ .SEPARATOR = 1 }, 0, null);
                     _ = win32.AppendMenuW(menu, .{}, ID_TRAY_EXIT, L("Exit"));
 
                     // Get cursor position for menu
@@ -320,6 +326,17 @@ fn WindowProc(
             const cmd = @as(u16, @truncate(wParam & 0xFFFF));
             if (cmd == ID_TRAY_EXIT) {
                 _ = win32.DestroyWindow(hwnd);
+            } else if (cmd == ID_TRAY_TOGGLE_CROSSHAIRS) {
+                // Toggle crosshairs visibility
+                g_crosshairsEnabled = !g_crosshairsEnabled;
+                if (g_hCrosshairWindow) |ch_hwnd| {
+                    if (g_crosshairsEnabled) {
+                        _ = win32.ShowWindow(ch_hwnd, win32.SW_SHOWNOACTIVATE);
+                        UpdateCrosshairDisplay();
+                    } else {
+                        _ = win32.ShowWindow(ch_hwnd, win32.SW_HIDE);
+                    }
+                }
             }
             return 0;
         },
