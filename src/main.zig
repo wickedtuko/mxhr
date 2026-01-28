@@ -6,6 +6,8 @@ const HWND = win32.HWND;
 const WM_TRAYICON = win32.WM_USER + 1;
 const ID_TRAY_EXIT = 1001;
 
+var g_hCrosshairWindow: ?HWND = null;
+
 pub export fn wWinMain(
     hInstance: win32.HINSTANCE,
     _: ?win32.HINSTANCE,
@@ -63,6 +65,9 @@ pub export fn wWinMain(
         win32.panicWin32("Shell_NotifyIcon", win32.GetLastError());
     }
 
+    // Create the crosshair overlay window
+    g_hCrosshairWindow = CreateCrosshairWindow(hInstance) catch null;
+
     _ = win32.ShowWindow(hwnd, win32.SW_HIDE);
 
     var msg: win32.MSG = undefined;
@@ -71,6 +76,74 @@ pub export fn wWinMain(
         _ = win32.DispatchMessageW(&msg);
     }
     return @intCast(msg.wParam);
+}
+
+fn CrosshairWindowProc(
+    hwnd: HWND,
+    uMsg: u32,
+    wParam: win32.WPARAM,
+    lParam: win32.LPARAM,
+) callconv(.winapi) win32.LRESULT {
+    switch (uMsg) {
+        win32.WM_NCHITTEST => {
+            // Make window click-through
+            return win32.HTTRANSPARENT;
+        },
+        win32.WM_DESTROY => {
+            return 0;
+        },
+        else => {},
+    }
+    return win32.DefWindowProcW(hwnd, uMsg, wParam, lParam);
+}
+
+fn CreateCrosshairWindow(hInstance: win32.HINSTANCE) !HWND {
+    const CROSSHAIR_CLASS_NAME = L("CrosshairOverlay");
+
+    // Register window class for crosshair overlay
+    const wc = win32.WNDCLASSW{
+        .style = .{},
+        .lpfnWndProc = CrosshairWindowProc,
+        .cbClsExtra = 0,
+        .cbWndExtra = 0,
+        .hInstance = hInstance,
+        .hIcon = null,
+        .hCursor = null,
+        .hbrBackground = null,
+        .lpszMenuName = null,
+        .lpszClassName = CROSSHAIR_CLASS_NAME,
+    };
+
+    if (0 == win32.RegisterClassW(&wc)) {
+        return error.RegisterClassFailed;
+    }
+
+    // Get virtual screen dimensions for multi-monitor support
+    const x = win32.GetSystemMetrics(win32.SM_XVIRTUALSCREEN);
+    const y = win32.GetSystemMetrics(win32.SM_YVIRTUALSCREEN);
+    const width = win32.GetSystemMetrics(win32.SM_CXVIRTUALSCREEN);
+    const height = win32.GetSystemMetrics(win32.SM_CYVIRTUALSCREEN);
+
+    // Create fullscreen transparent overlay window
+    const hwnd = win32.CreateWindowExW(
+        .{ .LAYERED = 1, .TRANSPARENT = 1, .TOOLWINDOW = 1, .TOPMOST = 1 },
+        CROSSHAIR_CLASS_NAME,
+        L("Crosshair Overlay"),
+        win32.WS_POPUP,
+        x,
+        y,
+        width,
+        height,
+        null, // No parent
+        null, // No menu
+        hInstance,
+        null,
+    ) orelse return error.CreateWindowFailed;
+
+    // Set window to be completely transparent initially
+    _ = win32.SetLayeredWindowAttributes(hwnd, 0, 0, win32.LWA_ALPHA);
+
+    return hwnd;
 }
 
 fn WindowProc(
@@ -126,6 +199,12 @@ fn WindowProc(
             return 0;
         },
         win32.WM_DESTROY => {
+            // Destroy crosshair window if it exists
+            if (g_hCrosshairWindow) |ch_hwnd| {
+                _ = win32.DestroyWindow(ch_hwnd);
+                g_hCrosshairWindow = null;
+            }
+
             // Remove system tray icon
             var nid: win32.NOTIFYICONDATAW = undefined;
             nid.cbSize = @sizeOf(win32.NOTIFYICONDATAW);
