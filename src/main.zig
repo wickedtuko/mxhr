@@ -6,6 +6,7 @@ const HWND = win32.HWND;
 const WM_TRAYICON = win32.WM_USER + 1;
 const ID_TRAY_EXIT = 1001;
 const ID_TRAY_TOGGLE_CROSSHAIRS = 1002;
+const ID_HOTKEY_TOGGLE = 1;
 
 const CrosshairSettings = struct {
     color: u32 = 0x00FFFF, // Bright yellow (BGR format)
@@ -95,6 +96,9 @@ pub export fn wWinMain(
         _ = win32.ShowWindow(ch_hwnd, win32.SW_SHOWNOACTIVATE);
         UpdateCrosshairDisplay();
     }
+
+    // Register hotkey: Win+Alt+P to toggle crosshairs
+    _ = win32.RegisterHotKey(hwnd, ID_HOTKEY_TOGGLE, .{ .WIN = 1, .ALT = 1 }, 'P');
 
     _ = win32.ShowWindow(hwnd, win32.SW_HIDE);
 
@@ -340,7 +344,26 @@ fn WindowProc(
             }
             return 0;
         },
+        win32.WM_HOTKEY => {
+            const hotkeyId = @as(i32, @intCast(wParam));
+            if (hotkeyId == ID_HOTKEY_TOGGLE) {
+                // Toggle crosshairs visibility
+                g_crosshairsEnabled = !g_crosshairsEnabled;
+                if (g_hCrosshairWindow) |ch_hwnd| {
+                    if (g_crosshairsEnabled) {
+                        _ = win32.ShowWindow(ch_hwnd, win32.SW_SHOWNOACTIVATE);
+                        UpdateCrosshairDisplay();
+                    } else {
+                        _ = win32.ShowWindow(ch_hwnd, win32.SW_HIDE);
+                    }
+                }
+            }
+            return 0;
+        },
         win32.WM_DESTROY => {
+            // Unregister hotkey
+            _ = win32.UnregisterHotKey(hwnd, ID_HOTKEY_TOGGLE);
+
             // Remove mouse hook
             if (g_mouseHook) |hook| {
                 _ = win32.UnhookWindowsHookEx(hook);
