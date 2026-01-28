@@ -63,7 +63,7 @@ pub export fn wWinMain(
         win32.panicWin32("Shell_NotifyIcon", win32.GetLastError());
     }
 
-    _ = win32.ShowWindow(hwnd, .{ .SHOWNORMAL = 1 });
+    _ = win32.ShowWindow(hwnd, win32.SW_HIDE);
 
     var msg: win32.MSG = undefined;
     while (win32.GetMessageW(&msg, null, 0, 0) != 0) {
